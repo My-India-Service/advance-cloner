@@ -198,167 +198,163 @@
 
     <script>
         document.getElementById('cloneForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+    e.preventDefault();
 
-            const submitBtn = document.getElementById('submitBtn');
-            const progressContainer = document.getElementById('progressContainer');
-            const statusText = document.getElementById('statusText');
-            const progressBar = document.getElementById('progressBar');
-            const progressPercent = document.getElementById('progressPercent');
-            const currentUrl = document.getElementById('currentUrl');
-            const stats = document.getElementById('stats');
-            const statusIndicator = document.getElementById('statusIndicator');
+    const submitBtn = document.getElementById('submitBtn');
+    const progressContainer = document.getElementById('progressContainer');
+    const statusText = document.getElementById('statusText');
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const currentUrl = document.getElementById('currentUrl');
+    const stats = document.getElementById('stats');
+    const statusIndicator = document.getElementById('statusIndicator');
 
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Cloning...';
-            progressContainer.classList.remove('hidden');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Cloning...';
+    progressContainer.classList.remove('hidden');
 
-            const formData = {
-                url: document.getElementById('url').value,
-                depth: document.getElementById('depth').value,
-                fileTypes: document.getElementById('fileTypes').value,
-                followExternal: document.getElementById('followExternal').checked,
-                cleanUrls: document.getElementById('cleanUrls').checked
-            };
+    const formData = {
+        url: document.getElementById('url').value,
+        depth: document.getElementById('depth').value,
+        fileTypes: document.getElementById('fileTypes').value,
+        followExternal: document.getElementById('followExternal').checked,
+        cleanUrls: document.getElementById('cleanUrls').checked
+    };
 
-            try {
-                // Start the cloning process
-                const response = await fetch('/api/clone', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(formData)
-                });
+    try {
+        // Start the cloning process
+        const response = await fetch('/api/clone', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData)
+        });
 
-                if (!response.ok) {
-                    throw new Error('Failed to start cloning process');
-                }
+        if (!response.ok) {
+            throw new Error('Failed to start cloning process');
+        }
 
-                const { id } = await response.json();
-                if (!id) throw new Error('No job ID returned from server');
+        const { id } = await response.json();
+        if (!id) throw new Error('No job ID returned from server');
 
-                // Establish SSE connection for progress updates
-                const eventSource = new EventSource(`/api/clone/status`);
+        // Create SSE connection for THIS job
+        const eventSource = new EventSource(`/api/clone/status/${id}`);
 
-                eventSource.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    // Only process events for this job
-                    if (data.id !== id) return;
-
-                    if (data.complete) {
-                        eventSource.close();
-                        showResult(data);
-                        return;
-                    }
-
-                    if (data.error) {
-                        eventSource.close();
-                        statusText.textContent = 'Error: ' + data.error;
-                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Try Again';
-                        return;
-                    }
-
-                    // Update progress
-                    const percent = Math.round((data.progress || 0) * 100);
-                    progressBar.style.width = `${percent}%`;
-                    progressPercent.textContent = `${percent}%`;
-
-                    statusText.textContent = data.status || 'Working...';
-                    currentUrl.textContent = data.currentUrl || '';
-
-                    // Update stats
-                    if (data.stats) {
-                        stats.innerHTML = `
-                            Pages: ${data.stats.pages || 0} •
-                            Files: ${data.stats.files || 0} •
-                            Speed: ${data.stats.speed || '0'} KB/s
-                        `;
-                    }
-
-                    // Update status indicator color
-                    if (data.status === 'Downloading') {
-                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-green-500';
-                    } else if (data.status === 'Processing') {
-                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-blue-500';
-                    } else {
-                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-yellow-500';
-                    }
-                };
-
-                eventSource.onerror = () => {
-                    eventSource.close();
-                    statusText.textContent = 'Connection error';
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.complete) {
+                eventSource.close();
+                if (data.error) {
+                    // Handle error
+                    statusText.textContent = 'Error: ' + data.error;
                     statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
                     submitBtn.disabled = false;
                     submitBtn.textContent = 'Try Again';
-                };
-
-            } catch (error) {
-                console.error('Error:', error);
-                statusText.textContent = 'Error: ' + error.message;
-                statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Try Again';
-            }
-        });
-        
-        function showResult(result) {
-            document.getElementById('progressContainer').classList.add('hidden');
-            
-            const resultContainer = document.getElementById('resultContainer');
-            resultContainer.classList.remove('hidden');
-            
-            document.getElementById('summaryText').textContent = 
-                `Successfully cloned ${result.url} with ${result.stats.pages} pages and ${result.stats.files} assets.`;
-            
-            const statsList = document.getElementById('statsList');
-            statsList.innerHTML = `
-                <li>URL: ${result.url}</li>
-                <li>Pages: ${result.stats.pages}</li>
-                <li>Assets: ${result.stats.files}</li>
-                <li>Total size: ${formatBytes(result.stats.size)}</li>
-                <li>Time: ${result.stats.time}s</li>
-                <li>Success rate: ${result.stats.successRate}%</li>
-            `;
-            
-            document.getElementById('downloadBtn').href = `/api/clone/download/${result.id}`;
-            
-            // Generate simple file tree
-            const fileTree = document.getElementById('fileTree');
-            if (result.fileTree) {
-                fileTree.innerHTML = renderFileTree(result.fileTree);
-            } else {
-                fileTree.textContent = 'No file structure information available';
-            }
-        }
-        
-        function renderFileTree(tree, indent = 0) {
-            let html = '';
-            const padding = '&nbsp;'.repeat(indent * 4);
-            
-            for (const [key, value] of Object.entries(tree)) {
-                if (typeof value === 'object') {
-                    html += `${padding}📁 ${key}\n${renderFileTree(value, indent + 1)}`;
                 } else {
-                    html += `${padding}📄 ${key}\n`;
+                    showResult(data);
                 }
+                return;
             }
-            
-            return html;
+
+            // Update progress
+            const percent = Math.round((data.progress || 0) * 100);
+            progressBar.style.width = `${percent}%`;
+            progressPercent.textContent = `${percent}%`;
+            statusText.textContent = data.status || 'Working...';
+            currentUrl.textContent = data.currentUrl || '';
+
+            // Update stats
+            if (data.stats) {
+                stats.innerHTML = `
+                    Pages: ${data.stats.pages || 0} •
+                    Files: ${data.stats.files || 0} •
+                    Speed: ${data.stats.speed || '0'} KB/s
+                `;
+            }
+
+            // Update status indicator
+            if (data.status && data.status.includes('Downloading')) {
+                statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-green-500';
+            } else if (data.status && data.status.includes('Processing')) {
+                statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-blue-500';
+            } else {
+                statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-yellow-500';
+            }
+        };
+
+        eventSource.onerror = () => {
+            eventSource.close();
+            statusText.textContent = 'Connection error';
+            statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Try Again';
+        };
+
+    } catch (error) {
+        console.error('Error:', error);
+        statusText.textContent = 'Error: ' + error.message;
+        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Try Again';
+    }
+});
+
+function showResult(result) {
+    document.getElementById('progressContainer').classList.add('hidden');
+    
+    const resultContainer = document.getElementById('resultContainer');
+    resultContainer.classList.remove('hidden');
+    
+    document.getElementById('summaryText').textContent = 
+        `Successfully cloned ${result.url} with ${result.stats.pages} pages and ${result.stats.files} assets.`;
+    
+    const statsList = document.getElementById('statsList');
+    statsList.innerHTML = `
+        <li>URL: ${result.url}</li>
+        <li>Pages: ${result.stats.pages}</li>
+        <li>Assets: ${result.stats.files}</li>
+        <li>Total size: ${formatBytes(result.stats.size)}</li>
+        <li>Time: ${result.stats.time}s</li>
+        <li>Success rate: ${result.stats.successRate}%</li>
+    `;
+    
+    document.getElementById('downloadBtn').href = result.zipPath || `/api/clone/download/${result.id}`;
+    
+    // Generate simple file tree
+    const fileTree = document.getElementById('fileTree');
+    if (result.fileTree) {
+        fileTree.innerHTML = renderFileTree(result.fileTree);
+    } else {
+        fileTree.textContent = 'No file structure information available';
+    }
+}
+
+function renderFileTree(tree, indent = 0) {
+    let html = '';
+    const padding = '&nbsp;'.repeat(indent * 4);
+    
+    for (const [key, value] of Object.entries(tree)) {
+        if (typeof value === 'object') {
+            html += `${padding}📁 ${key}\n${renderFileTree(value, indent + 1)}`;
+        } else {
+            html += `${padding}📄 ${key}\n`;
         }
-        
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+    }
+    
+    return html;
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
     </script>
 </body>
 </html>
