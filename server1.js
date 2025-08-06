@@ -10,12 +10,14 @@ const PQueue = require('p-queue');
 const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'))); // Serve HTML/CSS/JS
 
-const crawlJobs = new Map();
+const crawlJobs = new Map(); // { id: { ...status } }
 const sse = new SSE();
 
+// Send SSE keep-alive every 15 seconds to all clients
 setInterval(() => {
+    // Send a keep-alive for each active job
     for (const [jobId, job] of crawlJobs.entries()) {
         if (!job.complete) {
             sse.send({
@@ -32,6 +34,7 @@ setInterval(() => {
     }
 }, 15000);
 
+// Utility: normalize and resolve URLs, clean filenames, etc.
 function normalizeUrl(base, href) {
     try {
         return new URL(href, base).href;
@@ -39,18 +42,15 @@ function normalizeUrl(base, href) {
         return null;
     }
 }
-
 function cleanFilename(url) {
     let parsed = new URL(url);
     let file = parsed.pathname.endsWith('/') ? 'index.html' : path.basename(parsed.pathname);
     let dir = parsed.pathname.endsWith('/') ? parsed.pathname : path.dirname(parsed.pathname);
     return (dir + '/' + file).replace(/\/+/g, '/').replace(/^\//, '');
 }
-
 function isInternal(url, rootUrl) {
     return new URL(url).hostname === new URL(rootUrl).hostname;
 }
-
 function filterAssets($, fileTypes, baseUrl) {
     let assets = [];
     if (fileTypes === 'html' || fileTypes === 'all' || fileTypes === 'custom') {
@@ -68,11 +68,10 @@ function filterAssets($, fileTypes, baseUrl) {
     }
     return assets.filter(Boolean);
 }
-
 function extractLinks($, baseUrl, followExternal, rootUrl) {
     let links = [];
     $('a[href]').each((_, el) => {
-        let href = $(el).attr('href');
+        let href = $ (el).attr('href');
         let abs = normalizeUrl(baseUrl, href);
         if (!abs) return;
         if (followExternal || isInternal(abs, rootUrl)) links.push(abs);
@@ -80,33 +79,15 @@ function extractLinks($, baseUrl, followExternal, rootUrl) {
     return links.filter(Boolean);
 }
 
-async function crawlWebsite(config, jobId, sendProgress) {
+// The website copier main logic
+async function crawlWebsite({ url, depth, fileTypes, followExternal, cleanUrls }, jobId, sendProgress) {
     let visited = new Set();
-    let fileMap = {};
+    let fileMap = {}; // { filename: Buffer }
     let queue = new PQueue({ concurrency: 5 });
-    let rootUrl = config.url;
+    let rootUrl = url;
     let pages = 0, files = 0, size = 0, success = 0, fail = 0;
     let startedAt = Date.now();
     let fileTree = {};
-
-    // Create progress state
-    let progressState = {
-        progress: 0,
-        status: 'Preparing to crawl...',
-        currentUrl: config.url,
-        stats: { pages: 0, files: 0, speed: 0 },
-    };
-
-    // Enhanced progress sending
-    const updateProgress = (update) => {
-        if (sendProgress) {
-            progressState = { ...progressState, ...update };
-            sendProgress(progressState);
-        }
-    };
-
-    // Send initial progress
-    updateProgress({ status: 'Starting crawl...', progress: 0.01 });
 
     async function downloadAsset(assetUrl) {
         if (!assetUrl || visited.has(assetUrl)) return;
@@ -115,21 +96,48 @@ async function crawlWebsite(config, jobId, sendProgress) {
             let res = await fetch(assetUrl, { redirect: 'follow' });
             if (!res.ok) throw new Error('Failed');
             let buf = await res.buffer();
-            let filename = config.cleanUrls ? cleanFilename(assetUrl) : assetUrl.replace(/https?:\/\//, '');
+            let filename = cleanUrls ? cleanFilename(assetUrl) : assetUrl.replace(/https?:\/\//, '');
             fileMap[filename] = buf;
             files++;
             size += buf.length;
-            success++;
-            
-            // Update stats periodically
-            if (files % 5 === 0) {
-                const elapsed = (Date.now() - startedAt) / 1000;
-                updateProgress({
-                    stats: { 
-                        pages, 
-                        files, 
-                        speed: Math.round(size / elapsed / 1024)
-                    }
+        } catch (e) {
+            fail++;
+        }
+    }
+
+    async function crawlPage(pageUrl, level) {
+        if (!pageUrl || visited.has(pageUrl) || (depth > 0 && level > depth)) return;
+        visited.add(pageUrl);
+
+        try {
+            let res = await fetch(pageUrl, { redirect: 'follow' });
+            if (!res.ok) throw new Error('Failed');
+            let html = await res.text();
+            let filename = cleanUrls ? cleanFilename(pageUrl) : pageUrl.replace(/https?:\/\//, '');
+            fileMap[filename] = Buffer.from(html, 'utf8');
+            pages++;
+            size += Buffer.byteLength(html);
+
+            // Parse and queue assets/links
+            let $ = cheerio.load(html);
+            let assets = filterAssets($, fileTypes, pageUrl);
+            let links = extractLinks($, pageUrl, followExternal, rootUrl);
+
+            // Queue assets
+            for (let assetUrl of assets) {
+                queue.add(() => downloadAsset(assetUrl));
+            }
+            // Queue internal links
+            for (let link of links) {
+                queue.add(() => crawlPage(link, level + 1));
+            }
+
+            if (sendProgress) {
+                sendProgress({
+                    progress: Math.min((pages + files) / 200, 1.0),
+                    status: 'Downloading',
+                    currentUrl: pageUrl,
+                    stats: { pages, files, speed: Math.round(size / 1024) },
                 });
             }
         } catch (e) {
@@ -137,55 +145,10 @@ async function crawlWebsite(config, jobId, sendProgress) {
         }
     }
 
-    async function crawlPage(pageUrl, level) {
-        if (!pageUrl || visited.has(pageUrl) || (config.depth > 0 && level > config.depth)) return;
-        visited.add(pageUrl);
-
-        // Send immediate status update
-        updateProgress({ 
-            status: 'Downloading', 
-            currentUrl: pageUrl,
-            progress: Math.min(0.05 + (progressState.progress || 0), 0.95)
-        });
-
-        try {
-            let res = await fetch(pageUrl, { redirect: 'follow' });
-            if (!res.ok) throw new Error('Failed');
-            let html = await res.text();
-            let filename = config.cleanUrls ? cleanFilename(pageUrl) : pageUrl.replace(/https?:\/\//, '');
-            fileMap[filename] = Buffer.from(html, 'utf8');
-            pages++;
-            size += Buffer.byteLength(html);
-            success++;
-
-            let $ = cheerio.load(html);
-            let assets = filterAssets($, config.fileTypes, pageUrl);
-            let links = extractLinks($, pageUrl, config.followExternal, rootUrl);
-
-            for (let assetUrl of assets) {
-                queue.add(() => downloadAsset(assetUrl));
-            }
-            for (let link of links) {
-                queue.add(() => crawlPage(link, level + 1));
-            }
-
-            const elapsed = (Date.now() - startedAt) / 1000;
-            updateProgress({
-                progress: Math.min(0.1 + (pages + files) / 200, 0.95),
-                stats: { 
-                    pages, 
-                    files, 
-                    speed: Math.round(size / elapsed / 1024)
-                }
-            });
-        } catch (e) {
-            fail++;
-        }
-    }
-
-    await queue.add(() => crawlPage(config.url, 1));
+    await queue.add(() => crawlPage(url, 1));
     await queue.onIdle();
 
+    // Build fileTree
     function setTreeNode(tree, segments, idx = 0) {
         const key = segments[idx];
         if (idx === segments.length - 1) {
@@ -200,52 +163,50 @@ async function crawlWebsite(config, jobId, sendProgress) {
     }
 
     let time = ((Date.now() - startedAt) / 1000).toFixed(2);
-    let successRate = ((success) / (pages + files) * 100).toFixed(1);
+    let successRate = ((pages + files - fail) / (pages + files) * 100).toFixed(1);
 
     return {
-        url: config.url,
+        url,
         stats: { pages, files, size, time, successRate },
         fileMap,
         fileTree,
     };
 }
 
+// Serve your form HTML
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/code.html'));
 });
-
+// Start the clone
 app.post('/api/clone', async (req, res) => {
     try {
         const { url, depth, fileTypes, followExternal, cleanUrls } = req.body;
         const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2);
-        
-        // Initialize job with progress state
-        crawlJobs.set(jobId, { 
-            status: 'Starting...', 
+        crawlJobs.set(jobId, { status: 'pending', progress: 0 });
+
+        // Immediately send initializing progress event
+        sse.send({
+            id: jobId,
+            status: 'Initializing...',
             progress: 0,
             currentUrl: url,
             stats: { pages: 0, files: 0, speed: 0 },
-            id: jobId
+            complete: false
         });
 
-        // Immediately notify client
-        sse.send({ ...crawlJobs.get(jobId), complete: false });
-
-        // Start background job
+        // Start crawl in background
         (async () => {
             try {
                 function sendProgress(update) {
-                    const fullUpdate = { ...update, id: jobId };
-                    crawlJobs.set(jobId, fullUpdate);
-                    sse.send({ ...fullUpdate, complete: false });
+                    crawlJobs.set(jobId, { ...update, id: jobId });
+                    sse.send({ ...update, id: jobId, complete: false });
                 }
-                
                 let result = await crawlWebsite(
                     { url, depth: +depth, fileTypes, followExternal, cleanUrls },
                     jobId,
                     sendProgress
                 );
-                
+                // Save ZIP to disk for demo (prod: use memory or temp storage)
                 const zipPath = path.join(__dirname, 'downloads', `${jobId}.zip`);
                 fs.mkdirSync(path.dirname(zipPath), { recursive: true });
                 const output = fs.createWriteStream(zipPath);
@@ -256,9 +217,8 @@ app.post('/api/clone', async (req, res) => {
                 }
                 await archive.finalize();
 
-                const finalResult = { ...result, id: jobId, complete: true };
-                crawlJobs.set(jobId, finalResult);
-                sse.send(finalResult);
+                crawlJobs.set(jobId, { ...result, id: jobId, complete: true });
+                sse.send({ ...result, id: jobId, complete: true });
             } catch (e) {
                 crawlJobs.set(jobId, { error: e.message, complete: true, id: jobId });
                 sse.send({ error: e.message, id: jobId, complete: true });
@@ -271,8 +231,10 @@ app.post('/api/clone', async (req, res) => {
     }
 });
 
+// SSE endpoint for progress
 app.get('/api/clone/status', sse.init);
 
+// Download endpoint
 app.get('/api/clone/download/:id', (req, res) => {
     const { id } = req.params;
     const zipPath = path.join(__dirname, 'downloads', `${id}.zip`);
