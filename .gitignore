@@ -10,6 +10,10 @@
 ./.env.local
 ./.env.development.local
 node_modules
+downloads
+dist
+downloads/*
+
 
 # Editor directories and files
 .idea
