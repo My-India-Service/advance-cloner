@@ -9,7 +9,8 @@ const PQueue = require('p-queue');
 
 const app = express();
 app.use(express.json());
-
+// Serve static files from the 'public' directory
+app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 
 const crawlJobs = new Map(); // { id: { ...status } }
