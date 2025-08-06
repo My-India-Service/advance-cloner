@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Copier - HTTrack Alternative</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        .status-indicator {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-indigo-700 mb-2">Website Copier</h1>
+            <p class="text-gray-600">A powerful HTTrack alternative for downloading complete websites</p>
+        </header>
+
+        <main class="bg-white rounded-lg shadow-lg p-6">
+            <form id="cloneForm" class="space-y-6">
+                <div>
+                    <label for="url" class="block text-sm font-medium text-gray-700 mb-1">Website URL</label>
+                    <input 
+                        type="url" 
+                        id="url" 
+                        name="url" 
+                        placeholder="https://example.com" 
+                        required
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="depth" class="block text-sm font-medium text-gray-700 mb-1">Crawl Depth</label>
+                        <select 
+                            id="depth" 
+                            name="depth"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="1">Level 1 (Homepage only)</option>
+                            <option value="2" selected>Level 2 (Homepage + linked pages)</option>
+                            <option value="3">Level 3 (All internal links)</option>
+                            <option value="0">Maximum depth (Follow all links)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="fileTypes" class="block text-sm font-medium text-gray-700 mb-1">File Types</label>
+                        <select 
+                            id="fileTypes" 
+                            name="fileTypes"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="html">HTML only</option>
+                            <option value="all" selected>All assets (HTML, CSS, JS, images)</option>
+                            <option value="images">Images only</option>
+                            <option value="custom">Custom selection</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex items-center">
+                    <input 
+                        type="checkbox" 
+                        id="followExternal" 
+                        name="followExternal"
+                        class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                    >
+                    <label for="followExternal" class="ml-2 block text-sm text-gray-700">
+                        Follow external links (outside domain)
+                    </label>
+                </div>
+
+                <div class="flex items-center">
+                    <input 
+                        type="checkbox" 
+                        id="cleanUrls" 
+                        name="cleanUrls"
+                        checked
+                        class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                    >
+                    <label for="cleanUrls" class="ml-2 block text-sm text-gray-700">
+                        Clean filenames (remove query parameters)
+                    </label>
+                </div>
+
+                <div id="progressContainer" class="hidden">
+                    <div class="flex justify-between mb-1">
+                        <span id="statusText" class="text-sm font-medium text-indigo-700">Initializing...</span>
+                        <span id="progressPercent" class="text-sm font-medium text-indigo-700">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="progress-bar bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <div id="details" class="mt-2 text-sm text-gray-600">
+                        <div class="flex items-center">
+                            <span id="currentUrl" class="truncate"></span>
+                            <span id="statusIndicator" class="status-indicator ml-2 h-2 w-2 rounded-full bg-yellow-500"></span>
+                        </div>
+                        <div id="stats" class="mt-1"></div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button
+                        type="submit"
+                        id="submitBtn"
+                        class="px-6 py-2 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                        Start Cloning
+                    </button>
+                </div>
+            </form>
+
+            <div id="resultContainer" class="mt-8 hidden">
+                <div class="border-b border-gray-200 pb-4 mb-4">
+                    <h2 class="text-lg font-medium text-gray-900">Download Complete!</h2>
+                    <p id="summaryText" class="text-sm text-gray-500 mt-1"></p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-700 mb-2">Download Stats</h3>
+                        <ul id="statsList" class="text-sm text-gray-600 space-y-1"></ul>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-700 mb-2">File Structure</h3>
+                        <div id="fileTree" class="bg-gray-50 border border-gray-200 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto"></div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <a
+                        href="#"
+                        id="downloadBtn"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                        <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                        Download Website Bundle
+                    </a>
+                </div>
+            </div>
+        </main>
+
+        <div class="mt-8 bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">How It Works</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-indigo-50 rounded-lg p-4">
+                    <div class="flex items-center mb-2">
+                        <div class="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mr-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 6H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        <h3 class="font-medium text-indigo-800">Website Capture</h3>
+                    </div>
+                    <p class="text-sm text-gray-600">Recursively downloads HTML, CSS, JavaScript, and image files while maintaining their structure.</p>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-4">
+                    <div class="flex items-center mb-2">
+                        <div class="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mr-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                        </div>
+                        <h3 class="font-medium text-indigo-800">Smart Processing</h3>
+                    </div>
+                    <p class="text-sm text-gray-600">Handles redirects, cleans URLs, and rewrites local links to work offline.</p>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-4">
+                    <div class="flex items-center mb-2">
+                        <div class="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mr-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                        </div>
+                        <h3 class="font-medium text-indigo-800">Easy Deployment</h3>
+                    </div>
+                    <p class="text-sm text-gray-600">Download as a ZIP file that can be directly deployed anywhere after extraction.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('cloneForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const statusText = document.getElementById('statusText');
+            const progressBar = document.getElementById('progressBar');
+            const progressPercent = document.getElementById('progressPercent');
+            const currentUrl = document.getElementById('currentUrl');
+            const stats = document.getElementById('stats');
+            const statusIndicator = document.getElementById('statusIndicator');
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Cloning...';
+            progressContainer.classList.remove('hidden');
+            
+            const formData = {
+                url: document.getElementById('url').value,
+                depth: document.getElementById('depth').value,
+                fileTypes: document.getElementById('fileTypes').value,
+                followExternal: document.getElementById('followExternal').checked,
+                cleanUrls: document.getElementById('cleanUrls').checked
+            };
+            
+            try {
+                // Start the cloning process
+                const response = await fetch('/api/clone', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to start cloning process');
+                }
+                
+                // Establish SSE connection for progress updates
+                const eventSource = new EventSource(`/api/clone/status`);
+                
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.complete) {
+                        eventSource.close();
+                        showResult(data);
+                        return;
+                    }
+                    
+                    if (data.error) {
+                        eventSource.close();
+                        statusText.textContent = 'Error: ' + data.error;
+                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Try Again';
+                        return;
+                    }
+                    
+                    // Update progress
+                    const percent = Math.round(data.progress * 100);
+                    progressBar.style.width = `${percent}%`;
+                    progressPercent.textContent = `${percent}%`;
+                    
+                    statusText.textContent = data.status;
+                    currentUrl.textContent = data.currentUrl || '';
+                    
+                    // Update stats
+                    if (data.stats) {
+                        stats.innerHTML = `
+                            Pages: ${data.stats.pages || 0} •
+                            Files: ${data.stats.files || 0} •
+                            Speed: ${data.stats.speed || '0'} KB/s
+                        `;
+                    }
+                    
+                    // Update status indicator color
+                    if (data.status === 'Downloading') {
+                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-green-500';
+                    } else if (data.status === 'Processing') {
+                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-blue-500';
+                    } else {
+                        statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-yellow-500';
+                    }
+                };
+                
+                eventSource.onerror = () => {
+                    eventSource.close();
+                    statusText.textContent = 'Connection error';
+                    statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Try Again';
+                };
+                
+            } catch (error) {
+                console.error('Error:', error);
+                statusText.textContent = 'Error: ' + error.message;
+                statusIndicator.className = 'ml-2 h-2 w-2 rounded-full bg-red-500';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Try Again';
+            }
+        });
+        
+        function showResult(result) {
+            document.getElementById('progressContainer').classList.add('hidden');
+            
+            const resultContainer = document.getElementById('resultContainer');
+            resultContainer.classList.remove('hidden');
+            
+            document.getElementById('summaryText').textContent = 
+                `Successfully cloned ${result.url} with ${result.stats.pages} pages and ${result.stats.files} assets.`;
+            
+            const statsList = document.getElementById('statsList');
+            statsList.innerHTML = `
+                <li>URL: ${result.url}</li>
+                <li>Pages: ${result.stats.pages}</li>
+                <li>Assets: ${result.stats.files}</li>
+                <li>Total size: ${formatBytes(result.stats.size)}</li>
+                <li>Time: ${result.stats.time}s</li>
+                <li>Success rate: ${result.stats.successRate}%</li>
+            `;
+            
+            document.getElementById('downloadBtn').href = `/api/clone/download/${result.id}`;
+            
+            // Generate simple file tree
+            const fileTree = document.getElementById('fileTree');
+            if (result.fileTree) {
+                fileTree.innerHTML = renderFileTree(result.fileTree);
+            } else {
+                fileTree.textContent = 'No file structure information available';
+            }
+        }
+        
+        function renderFileTree(tree, indent = 0) {
+            let html = '';
+            const padding = '&nbsp;'.repeat(indent * 4);
+            
+            for (const [key, value] of Object.entries(tree)) {
+                if (typeof value === 'object') {
+                    html += `${padding}📁 ${key}\n${renderFileTree(value, indent + 1)}`;
+                } else {
+                    html += `${padding}📄 ${key}\n`;
+                }
+            }
+            
+            return html;
+        }
+        
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+    </script>
+</body>
+</html>
