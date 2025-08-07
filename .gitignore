@@ -13,7 +13,8 @@ node_modules/
 package-lock.json
 npm-debug.log*
 dist
-
+/downloads/*
+!/downloads/.gitkeep
 
 # Editor directories and files
 .idea
