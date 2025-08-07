@@ -9,10 +9,10 @@
 ./.env.test
 ./.env.local
 ./.env.development.local
-node_modules
-downloads
+node_modules/
+package-lock.json
+npm-debug.log*
 dist
-downloads/*
 
 
 # Editor directories and files
